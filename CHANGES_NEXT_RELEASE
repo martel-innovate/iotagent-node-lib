@@ -5,3 +5,4 @@
 - Fix: documentation and examples, using correctly "attributes" field in the Configuration API instead of "active" (#558)
 - Add: support HTTPS requests toward Keystone (if url is used in the authorization configuration)
 - Add: support OAuth2 provider as authentication backend (#591)
+- Add: support for authentication to subscription requests (#600) 
