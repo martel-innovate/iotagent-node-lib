@@ -6,3 +6,4 @@
 - Add: support HTTPS requests toward Keystone (if url is used in the authorization configuration)
 - Add: support OAuth2 provider as authentication backend (#591)
 - Fix: incomplete HTTPS support for subscriptions (#594)
+- Add: support for authentication to subscription requests (#600)
