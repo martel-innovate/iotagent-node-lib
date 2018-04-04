@@ -27,10 +27,7 @@ var iotAgentLib = require('../../../lib/fiware-iotagent-lib'),
     should = require('should'),
     logger = require('logops'),
     nock = require('nock'),
-<<<<<<< HEAD
-=======
     request = require('request'),
->>>>>>> task/auth-support-subscriptions
     contextBrokerMock,
     oauth2Mock,
     iotAgentConfig = {
@@ -257,8 +254,6 @@ describe('Secured access to the Context Broker with OAuth2 provider', function()
         });
     });
 
-<<<<<<< HEAD
-=======
     describe('When subscriptions are used on a protected Context Broker', function() {
           beforeEach(function(done) {
 
@@ -358,5 +353,4 @@ describe('Secured access to the Context Broker with OAuth2 provider', function()
         });
 
     });
->>>>>>> task/auth-support-subscriptions
 });
