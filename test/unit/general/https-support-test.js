@@ -31,6 +31,7 @@ var iotAgentLib = require('../../../lib/fiware-iotagent-lib'),
     groupRegistryMemory = require('../../../lib/services/groups/groupRegistryMemory'),
     should = require('should'),
     moment = require('moment'),
+    async = require('async'),
     iotAgentConfig = {
         logLevel: 'FATAL',
         contextBroker: {
@@ -132,33 +133,7 @@ var iotAgentLib = require('../../../lib/fiware-iotagent-lib'),
         deviceRegistrationDuration: 'P1M',
         throttling: 'PT5S'
     },
-    groupCreation = {
-        service: 'theService',
-        subservice: 'theSubService',
-        resource: '/deviceTest',
-        apikey: '801230BJKL23Y9090DSFL123HJK09H324HV8732',
-        type: 'SensorMachine',
-        trust: '8970A9078A803H3BL98PINEQRW8342HBAMS',
-        commands: [
-            {
-                name: 'wheel1',
-                type: 'Wheel'
-            }
-        ],
-        lazy: [
-            {
-                name: 'luminescence',
-                type: 'Lumens'
-            }
-        ],
-        attributes: [
-            {
-                name: 'status',
-                type: 'Boolean'
-            }
-        ]
-    },
-    device1 = {
+    device = {
         id: 'light1',
         type: 'Light',
         service: 'smartGondor',
@@ -173,6 +148,33 @@ describe('HTTPS support tests IOTAM', function() {
     describe('When the IoT Agents is started with https "iotManager" config', function() {
         beforeEach(function(done) {
             nock.cleanAll();
+
+            var groupCreation = {
+                service: 'theService',
+                subservice: 'theSubService',
+                resource: '/deviceTest',
+                apikey: '801230BJKL23Y9090DSFL123HJK09H324HV8732',
+                type: 'SensorMachine',
+                trust: '8970A9078A803H3BL98PINEQRW8342HBAMS',
+                commands: [
+                    {
+                        name: 'wheel1',
+                        type: 'Wheel'
+                    }
+                ],
+                lazy: [
+                    {
+                        name: 'luminescence',
+                        type: 'Lumens'
+                    }
+                ],
+                attributes: [
+                    {
+                        name: 'status',
+                        type: 'Boolean'
+                    }
+                ]
+            };
 
             iotamMock = nock('https://mockediotam.com:9876')
                 .post('/protocols',
@@ -296,7 +298,7 @@ describe('HTTPS support tests NGSIv1', function() {
         });
 
         it('should register as ContextProvider using HTTPS', function(done) {
-            iotAgentLib.register(device1, function(error) {
+            iotAgentLib.register(device, function(error) {
                     should.not.exist(error);
                     contextBrokerMock.done();
                     done();
@@ -307,7 +309,7 @@ describe('HTTPS support tests NGSIv1', function() {
           nock.cleanAll();
           iotAgentLib.clearAll(function() {
               // We need to remove the registrationId so that the library does not consider next operatios as updates.
-              delete device1.registrationId;
+              delete device.registrationId;
               iotAgentLib.deactivate(done);
           });
         });
@@ -403,6 +405,127 @@ describe('HTTPS support tests NGSIv2', function() {
         });
     });
 
+    describe('When subscription is sent to HTTPS context broker defined in service', function() {
+        beforeEach(function(done) {
+            var optionsProvision = {
+                url: 'http://localhost:' + iotAgentConfig.server.port + '/iot/devices',
+                method: 'POST',
+                json: utils.readExampleFile(
+                    './test/unit/examples/deviceProvisioningRequests/provisionMinimumDevice.json'),
+                headers: {
+                    'fiware-service': 'smartGondor',
+                    'fiware-servicepath': '/lights'
+                }
+            };
+
+          var optionsGroupCreation = {
+                  url: 'http://localhost:' + iotAgentConfig.server.port + '/iot/services',
+                  method: 'POST',
+                  json: {
+                      services: [
+                          {
+                              trust: '',
+                              service: 'smartGondor',
+                              subservice: 'lights',
+                              resource: '/deviceTest',
+                              apikey: '801230BJKL23Y9090DSFL123HJK09H324HV8734',
+                              entity_type: 'MicroLights',
+                              cbHost: 'https://192.168.1.2:1026',
+                              commands: [],
+                              lazy: [],
+                              attributes: [
+                                  {
+                                      name: 'status',
+                                      type: 'Boolean'
+                                  }
+                              ],
+                              static_attributes: []
+                          }
+                      ]
+                  },
+                  headers: {
+                      'fiware-service': 'TestService',
+                      'fiware-servicepath': '/testingPath'
+                  }
+              };
+    
+            nock.cleanAll();
+    
+            iotAgentLib.activate(iotAgentConfigV2, function() {
+    
+                contextBrokerMock = nock('https://192.168.1.2:1026')
+                    .matchHeader('fiware-service', 'smartGondor')
+                    .matchHeader('fiware-servicepath', '/lights')
+                    .post('/v2/entities?options=upsert',
+                        utils.readExampleFile('./test/unit/ngsiv2/examples/' +
+                            'contextRequests/createMinimumProvisionedDevice.json'))
+                    .reply(204);
+    
+                contextBrokerMock = nock('https://192.168.1.2:1026')
+                    .matchHeader('fiware-service', 'theService')
+                    .matchHeader('fiware-servicepath', '/lights')
+                    .post('/v2/subscriptions', function(body) {
+                        var expectedBody = utils.readExampleFile('./test/unit/ngsiv2/examples' +
+                            '/subscriptionRequests/simpleSubscriptionRequest.json');
+                        // Note that expired field is not included in the json used by this mock as it is a dynamic
+                        // field. The following code performs such calculation and adds the field to the subscription
+                        // payload of the mock.
+                        if (!body.expires)
+                        {
+                            return false;
+                        }
+                        else if (moment(body.expires, 'YYYY-MM-DDTHH:mm:ss.SSSZ').isValid())
+                        {
+                            expectedBody.expires = moment().add(moment.duration(iotAgentConfig.deviceRegistrationDuration));
+                            var expiresDiff = moment(expectedBody.expires).diff(body.expires, 'milliseconds');
+                            if (expiresDiff < 500) {
+                                delete expectedBody.expires;
+                                delete body.expires;
+    
+                                return JSON.stringify(body) === JSON.stringify(expectedBody);
+                            }
+    
+                            return false;
+                        }
+                        else {
+                            return false;
+                        }
+                    })
+                    .reply(201, null, {'Location': '/v2/subscriptions/51c0ac9ed714fb3b37d7d5a8'});
+ 
+                iotAgentLib.clearAll(function() {
+                  request(optionsGroupCreation, function(error, result, body) {
+                    console.error(result);
+                    console.error(body);
+                    request(optionsProvision, function(error, result, body) {
+                        done();
+                    });
+                  });
+                });
+            });
+        });
+    
+        afterEach(function(done) {
+            nock.cleanAll();
+            iotAgentLib.setNotificationHandler();
+            iotAgentLib.clearAll(function() {
+                iotAgentLib.deactivate(done);
+            });
+        });
+    
+        it('should send the appropriate request to the device specific Context Broker', function(done) {
+            iotAgentLib.getDevice('MicroLight1', 'smartGondor', '/lights', function(error, device) {
+                iotAgentLib.subscribe(device, ['attr_name'], null, function(error) {
+                    should.not.exist(error);
+            
+                    contextBrokerMock.done();
+            
+                    done();
+                });
+            });
+        });
+    });
+
     describe('When a new device is connected to the IoT Agent', function() {
         beforeEach(function(done) {
             nock.cleanAll();
@@ -432,7 +555,7 @@ describe('HTTPS support tests NGSIv2', function() {
         });
 
         it('should register as ContextProvider using HTTPS', function(done) {
-            iotAgentLib.register(device1, function(error) {
+            iotAgentLib.register(device, function(error) {
                     should.not.exist(error);
                     contextBrokerMock.done();
                     done();
@@ -443,7 +566,7 @@ describe('HTTPS support tests NGSIv2', function() {
             nock.cleanAll();
             iotAgentLib.clearAll(function() {
                 // We need to remove the registrationId so that the library does not consider next operatios as updates.
-                delete device1.registrationId;
+                delete device.registrationId;
                 iotAgentLib.deactivate(done);
             });
         });
